@@ -3,7 +3,7 @@
  * Plugin Name: Anti-Spam para Gravity Forms
  * Plugin URI: 
  * Description: Plugin personalizado para filtrar spam en Gravity Forms, especialmente de remitentes como "Eric Jones"
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: n3uron4
  * Author URI: 
  * License: GPL-2.0+
@@ -36,6 +36,9 @@ class GF_Anti_Spam_Filter {
             add_action('admin_notices', array($this, 'activation_notice'));
             update_option('gf_anti_spam_activated', 'yes');
         }
+        
+        // Añadir campo oculto para rastrear tiempo sin depender de cookies
+        add_filter('gform_form_tag', array($this, 'add_timestamp_field'), 10, 2);
     }
     
     /**
@@ -70,29 +73,156 @@ class GF_Anti_Spam_Filter {
         $blocked_emails = array_map('trim', explode(',', $options['blocked_emails']));
         $blocked_words = array_map('trim', explode(',', $options['blocked_words']));
         
-        // Verificar nombre
+        // Información para debugging
+        $debug_data = array(
+            'form_id' => $form['id'],
+            'post_data' => $_POST,
+            'blocked_names' => $blocked_names
+        );
+        
+        // Estrategia 1: Verificar campos de nombre específicos
+        $found_name_field = false;
         foreach ($form['fields'] as $field) {
+            // Verificar si el campo tiene la propiedad type antes de verificarla
+            if (!isset($field->type)) {
+                continue;
+            }
+            
+            // Verificar campos de tipo "name"
             if ($field->type == 'name') {
-                $input_name = 'input_' . $field->id;
+                $found_name_field = true;
+                
                 // Para campos de nombre compuesto
                 if (isset($field->inputs) && is_array($field->inputs)) {
                     foreach ($field->inputs as $input) {
+                        if (!isset($input['id'])) {
+                            continue;
+                        }
+                        
                         $input_name = 'input_' . str_replace('.', '_', $input['id']);
-                        if (isset($_POST[$input_name]) && $this->is_blocked_name($_POST[$input_name], $blocked_names)) {
-                            $this->block_submission('Nombre bloqueado detectado');
-                            break;
+                        
+                        if (isset($_POST[$input_name])) {
+                            $debug_data['name_field_found'][] = array(
+                                'field' => $input_name,
+                                'value' => $_POST[$input_name]
+                            );
+                            
+                            if ($this->is_blocked_name($_POST[$input_name], $blocked_names)) {
+                                // Registrar en debug
+                                $debug_data['blocked_match'] = array(
+                                    'field' => $input_name,
+                                    'value' => $_POST[$input_name]
+                                );
+                                
+                                // Guardar información de depuración
+                                update_option('gf_anti_spam_last_debug', $debug_data);
+                                
+                                $this->block_submission('Nombre bloqueado detectado');
+                                break;
+                            }
                         }
                     }
                 } 
                 // Para campos de nombre simple
-                else if (isset($_POST[$input_name]) && $this->is_blocked_name($_POST[$input_name], $blocked_names)) {
-                    $this->block_submission('Nombre bloqueado detectado');
+                else {
+                    $input_name = 'input_' . $field->id;
+                    
+                    if (isset($_POST[$input_name])) {
+                        $debug_data['name_field_found'][] = array(
+                            'field' => $input_name,
+                            'value' => $_POST[$input_name]
+                        );
+                        
+                        if ($this->is_blocked_name($_POST[$input_name], $blocked_names)) {
+                            // Registrar en debug
+                            $debug_data['blocked_match'] = array(
+                                'field' => $input_name,
+                                'value' => $_POST[$input_name]
+                            );
+                            
+                            // Guardar información de depuración
+                            update_option('gf_anti_spam_last_debug', $debug_data);
+                            
+                            $this->block_submission('Nombre bloqueado detectado');
+                        }
+                    }
+                }
+            }
+            
+            // También verificar campos de tipo "text" que podrían contener nombres
+            if ($field->type == 'text') {
+                $input_name = 'input_' . $field->id;
+                
+                // Verificar si el campo podría ser de nombre (heurística)
+                $is_name_field = false;
+                if (isset($field->label)) {
+                    $label = strtolower($field->label);
+                    // Detectar si es probable que sea un campo de nombre
+                    if (strpos($label, 'nombre') !== false || strpos($label, 'name') !== false || 
+                        strpos($label, 'apellido') !== false || strpos($label, 'first') !== false || 
+                        strpos($label, 'last') !== false) {
+                        $is_name_field = true;
+                    }
+                }
+                
+                if ($is_name_field && isset($_POST[$input_name])) {
+                    $debug_data['text_name_field_found'][] = array(
+                        'field' => $input_name,
+                        'value' => $_POST[$input_name]
+                    );
+                    
+                    if ($this->is_blocked_name($_POST[$input_name], $blocked_names)) {
+                        // Registrar en debug
+                        $debug_data['blocked_match'] = array(
+                            'field' => $input_name,
+                            'value' => $_POST[$input_name]
+                        );
+                        
+                        // Guardar información de depuración
+                        update_option('gf_anti_spam_last_debug', $debug_data);
+                        
+                        $this->block_submission('Nombre bloqueado detectado');
+                    }
+                }
+            }
+        }
+        
+        // Estrategia 2: Verificar TODOS los valores POST en busca de nombres bloqueados
+        // Esto es útil si la estructura del formulario no es estándar
+        if (!$found_name_field) {
+            foreach ($_POST as $key => $value) {
+                if (is_string($value)) {
+                    // Evitar revisar campos que claramente no serían nombres
+                    if (strpos($key, 'email') !== false || strpos($key, 'correo') !== false ||
+                        strpos($key, 'password') !== false || strpos($key, 'contrasena') !== false ||
+                        strpos($key, 'address') !== false || strpos($key, 'direccion') !== false) {
+                        continue;
+                    }
+                    
+                    // Comprobar si este valor coincide con un nombre bloqueado
+                    if ($this->is_blocked_name($value, $blocked_names)) {
+                        // Registrar en debug
+                        $debug_data['fallback_blocked_match'] = array(
+                            'field' => $key,
+                            'value' => $value
+                        );
+                        
+                        // Guardar información de depuración
+                        update_option('gf_anti_spam_last_debug', $debug_data);
+                        
+                        $this->block_submission('Nombre bloqueado detectado (verificación general)');
+                    }
                 }
             }
         }
         
         // Verificar email
         foreach ($form['fields'] as $field) {
+            // Verificar si el campo tiene la propiedad type antes de verificarla
+            if (!isset($field->type)) {
+                continue;
+            }
+            
             if ($field->type == 'email') {
                 $input_name = 'input_' . $field->id;
                 if (isset($_POST[$input_name])) {
@@ -118,13 +248,22 @@ class GF_Anti_Spam_Filter {
             $this->block_submission('User Agent vacío detectado');
         }
         
-        // Verificar velocidad de envío (usando una cookie para medir el tiempo)
+        // Verificar velocidad de envío usando campo oculto
         if (isset($options['submission_speed']) && $options['submission_speed'] > 0) {
             $form_id = $form['id'];
-            $cookie_name = 'gf_form_' . $form_id . '_start_time';
             
-            if (isset($_COOKIE[$cookie_name])) {
-                $start_time = (int) $_COOKIE[$cookie_name];
+            // Verificar timestamp oculto
+            if (isset($_POST['gf_antispam_timestamp'])) {
+                $start_time = (int) $_POST['gf_antispam_timestamp'];
+                $time_spent = time() - $start_time;
+                
+                if ($time_spent < (int) $options['submission_speed']) {
+                    $this->block_submission('Envío demasiado rápido');
+                }
+            }
+            // Verificar cookie como respaldo
+            else if (isset($_COOKIE['gf_form_' . $form_id . '_start_time'])) {
+                $start_time = (int) $_COOKIE['gf_form_' . $form_id . '_start_time'];
                 $time_spent = time() - $start_time;
                 
                 if ($time_spent < (int) $options['submission_speed']) {
@@ -140,12 +279,44 @@ class GF_Anti_Spam_Filter {
      * Verificar si un nombre está en la lista de bloqueados
      */
     private function is_blocked_name($name, $blocked_names) {
+        // Si es un array, combinar en una cadena
+        if (is_array($name)) {
+            $name = implode(' ', $name);
+        }
+        
+        // Limpiar y normalizar
         $name = strtolower(trim($name));
+        
+        // Si está vacío, no es spam
+        if (empty($name)) {
+            return false;
+        }
+        
+        // Verificar cada nombre en la lista de bloqueados
         foreach ($blocked_names as $blocked) {
-            if (!empty($blocked) && stripos($name, strtolower($blocked)) !== false) {
+            // Si el nombre bloqueado está vacío, ignorar
+            if (empty($blocked)) {
+                continue;
+            }
+            
+            // Normalizar nombre bloqueado
+            $blocked = strtolower(trim($blocked));
+            
+            // Verificar si el nombre bloqueado está en el nombre proporcionado
+            if (stripos($name, $blocked) !== false) {
+                // Si el nombre bloqueado "Eric Jones" está en "Eric Johnson", coincide
                 return true;
             }
+            
+            // Verificar componentes del nombre
+            $name_parts = explode(' ', $name);
+            foreach ($name_parts as $part) {
+                if ($part === $blocked) {
+                    return true;
+                }
+            }
         }
+        
         return false;
     }
     
@@ -264,6 +435,23 @@ class GF_Anti_Spam_Filter {
         }
         
         return sanitize_text_field($ip);
+    }
+    
+    /**
+     * Añadir campo oculto con timestamp para medir el tiempo de envío
+     * sin depender solo de cookies
+     * 
+     * @param string $form_tag El HTML del formulario
+     * @param array $form Los datos del formulario
+     * @return string El HTML del formulario modificado
+     */
+    public function add_timestamp_field($form_tag, $form) {
+        $timestamp = time();
+        $hidden_field = '<input type="hidden" name="gf_antispam_timestamp" value="' . $timestamp . '">';
+        
+        $form_tag = preg_replace('/<form(.*)>/', '<form$1>' . $hidden_field, $form_tag);
+        
+        return $form_tag;
     }
     
     /**
@@ -418,6 +606,7 @@ class GF_Anti_Spam_Filter {
         echo '<h2 class="nav-tab-wrapper">';
         echo '<a href="?page=gf-anti-spam&tab=settings" class="nav-tab ' . ($active_tab == 'settings' ? 'nav-tab-active' : '') . '">' . __('Configuración', 'gf-anti-spam') . '</a>';
         echo '<a href="?page=gf-anti-spam&tab=logs" class="nav-tab ' . ($active_tab == 'logs' ? 'nav-tab-active' : '') . '">' . __('Registros', 'gf-anti-spam') . '</a>';
+        echo '<a href="?page=gf-anti-spam&tab=debug" class="nav-tab ' . ($active_tab == 'debug' ? 'nav-tab-active' : '') . '">' . __('Depuración', 'gf-anti-spam') . '</a>';
         echo '</h2>';
         
         if ($active_tab == 'settings') {
@@ -432,18 +621,85 @@ class GF_Anti_Spam_Filter {
             echo '<p>' . __('Agrega este código a tu tema o usando un plugin de inserción de código:', 'gf-anti-spam') . '</p>';
             echo '<pre style="background: #f1f1f1; padding: 10px; overflow: auto;">
 &lt;script type="text/javascript"&gt;
-jQuery(document).ready(function($) {
-    // Para cada formulario de Gravity Forms en la página
-    $(".gform_wrapper form").each(function() {
-        var form_id = $(this).attr("id").split("_")[2];
-        // Establecer cookie con el tiempo de inicio
-        document.cookie = "gf_form_" + form_id + "_start_time=" + Math.floor(Date.now() / 1000) + "; path=/";
-    });
+document.addEventListener("DOMContentLoaded", function() {
+    // Comprobamos si jQuery está disponible
+    if (typeof jQuery !== "undefined") {
+        jQuery(document).ready(function($) {
+            // Para cada formulario de Gravity Forms en la página
+            $(".gform_wrapper form").each(function() {
+                try {
+                    var formId = null;
+                    
+                    // Método 1: Obtener el ID desde el atributo ID
+                    if ($(this).attr("id")) {
+                        var idParts = $(this).attr("id").split("_");
+                        if (idParts.length >= 3) {
+                            formId = idParts[2];
+                        }
+                    }
+                    
+                    // Método 2: Obtener el ID desde el campo de entrada oculto
+                    if (!formId) {
+                        var hiddenInput = $(this).find("input[name=\'gform_target_page_number_\']").first();
+                        if (hiddenInput.length) {
+                            var nameAttr = hiddenInput.attr("name");
+                            if (nameAttr) {
+                                var nameParts = nameAttr.split("_");
+                                if (nameParts.length >= 5) {
+                                    formId = nameParts[4];
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Método 3: Buscar en data-formid
+                    if (!formId) {
+                        if ($(this).data("formid")) {
+                            formId = $(this).data("formid");
+                        }
+                    }
+                    
+                    // Configurar cookie si encontramos el ID del formulario
+                    if (formId) {
+                        document.cookie = "gf_form_" + formId + "_start_time=" + Math.floor(Date.now() / 1000) + "; path=/";
+                    }
+                } catch (e) {
+                    console.error("GF Anti-Spam: Error al configurar cookie de tiempo", e);
+                }
+            });
+        });
+    } else {
+        // Si jQuery no está disponible, intentamos con JavaScript puro
+        try {
+            document.querySelectorAll(".gform_wrapper form").forEach(function(form) {
+                try {
+                    // Crear cookie con tiempo actual para cualquier formulario
+                    var timestamp = Math.floor(Date.now() / 1000);
+                    var formElement = form.closest("form");
+                    
+                    if (formElement && formElement.id) {
+                        var idParts = formElement.id.split("_");
+                        if (idParts.length >= 3) {
+                            var formId = idParts[2];
+                            document.cookie = "gf_form_" + formId + "_start_time=" + timestamp + "; path=/";
+                        }
+                    }
+                } catch (e) {
+                    console.error("GF Anti-Spam: Error al configurar cookie de tiempo", e);
+                }
+            });
+        } catch (e) {
+            console.error("GF Anti-Spam: Error al procesar formularios", e);
+        }
+    }
 });
 &lt;/script&gt;</pre>';
         } 
         else if ($active_tab == 'logs') {
             $this->display_logs_tab();
+        }
+        else if ($active_tab == 'debug') {
+            $this->display_debug_tab();
         }
         
         echo '</div>';
@@ -525,6 +781,46 @@ jQuery(document).ready(function($) {
         
         echo '</div>';
     }
+    
+    /**
+     * Mostrar pestaña de depuración
+     */
+    private function display_debug_tab() {
+        echo '<div class="wrap">';
+        echo '<h2>' . __('Información de depuración', 'gf-anti-spam') . '</h2>';
+        
+        $last_debug = get_option('gf_anti_spam_last_debug', array());
+        
+        if (empty($last_debug)) {
+            echo '<p>' . __('No hay información de depuración disponible. Esta información se genera cuando se procesa un formulario.', 'gf-anti-spam') . '</p>';
+        } else {
+            // Mostrar información de depuración
+            echo '<h3>' . __('Última información procesada', 'gf-anti-spam') . '</h3>';
+            
+            echo '<div style="background: #f8f8f8; padding: 15px; border: 1px solid #ddd; max-width: 800px; overflow-x: auto;">';
+            echo '<pre>' . esc_html(print_r($last_debug, true)) . '</pre>';
+            echo '</div>';
+            
+            // Botón para limpiar debug
+            echo '<div style="margin: 15px 0;">';
+            echo '<form method="post" action="">';
+            wp_nonce_field('clear_debug_data', 'gf_anti_spam_debug_nonce');
+            echo '<input type="hidden" name="action" value="clear_debug">';
+            echo '<button type="submit" class="button button-secondary">' . __('Limpiar datos de depuración', 'gf-anti-spam') . '</button>';
+            echo '</form>';
+            echo '</div>';
+            
+            // Procesar la acción de limpiar debug
+            if (isset($_POST['action']) && $_POST['action'] == 'clear_debug') {
+                if (check_admin_referer('clear_debug_data', 'gf_anti_spam_debug_nonce')) {
+                    delete_option('gf_anti_spam_last_debug');
+                    echo '<div class="notice notice-success is-dismissible"><p>' . __('Datos de depuración eliminados correctamente.', 'gf-anti-spam') . '</p></div>';
+                }
+            }
+        }
+        
+        echo '</div>';
+    }
 }
 
 // Inicializar el plugin
@@ -536,14 +832,78 @@ add_action('plugins_loaded', 'gf_anti_spam_init');
 // Añadir código JavaScript para medir el tiempo en el formulario
 function gf_anti_spam_enqueue_scripts() {
     if (class_exists('GFForms')) {
-        wp_add_inline_script('jquery', '
-            jQuery(document).ready(function($) {
-                // Para cada formulario de Gravity Forms en la página
-                $(".gform_wrapper form").each(function() {
-                    var form_id = $(this).attr("id").split("_")[2];
-                    // Establecer cookie con el tiempo de inicio
-                    document.cookie = "gf_form_" + form_id + "_start_time=" + Math.floor(Date.now() / 1000) + "; path=/";
-                });
+        wp_add_inline_script('gform_gravityforms', '
+            document.addEventListener("DOMContentLoaded", function() {
+                // Comprobamos si jQuery está disponible
+                if (typeof jQuery !== "undefined") {
+                    jQuery(document).ready(function($) {
+                        // Para cada formulario de Gravity Forms en la página
+                        $(".gform_wrapper form").each(function() {
+                            try {
+                                var formId = null;
+                                
+                                // Método 1: Obtener el ID desde el atributo ID
+                                if ($(this).attr("id")) {
+                                    var idParts = $(this).attr("id").split("_");
+                                    if (idParts.length >= 3) {
+                                        formId = idParts[2];
+                                    }
+                                }
+                                
+                                // Método 2: Obtener el ID desde el campo de entrada oculto
+                                if (!formId) {
+                                    var hiddenInput = $(this).find("input[name=\'gform_target_page_number_\']").first();
+                                    if (hiddenInput.length) {
+                                        var nameAttr = hiddenInput.attr("name");
+                                        if (nameAttr) {
+                                            var nameParts = nameAttr.split("_");
+                                            if (nameParts.length >= 5) {
+                                                formId = nameParts[4];
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Método 3: Buscar en data-formid
+                                if (!formId) {
+                                    if ($(this).data("formid")) {
+                                        formId = $(this).data("formid");
+                                    }
+                                }
+                                
+                                // Configurar cookie si encontramos el ID del formulario
+                                if (formId) {
+                                    document.cookie = "gf_form_" + formId + "_start_time=" + Math.floor(Date.now() / 1000) + "; path=/";
+                                }
+                            } catch (e) {
+                                console.error("GF Anti-Spam: Error al configurar cookie de tiempo", e);
+                            }
+                        });
+                    });
+                } else {
+                    // Si jQuery no está disponible, intentamos con JavaScript puro
+                    try {
+                        document.querySelectorAll(".gform_wrapper form").forEach(function(form) {
+                            try {
+                                // Crear cookie con tiempo actual para cualquier formulario
+                                var timestamp = Math.floor(Date.now() / 1000);
+                                var formElement = form.closest("form");
+                                
+                                if (formElement && formElement.id) {
+                                    var idParts = formElement.id.split("_");
+                                    if (idParts.length >= 3) {
+                                        var formId = idParts[2];
+                                        document.cookie = "gf_form_" + formId + "_start_time=" + timestamp + "; path=/";
+                                    }
+                                }
+                            } catch (e) {
+                                console.error("GF Anti-Spam: Error al configurar cookie de tiempo", e);
+                            }
+                        });
+                    } catch (e) {
+                        console.error("GF Anti-Spam: Error al procesar formularios", e);
+                    }
+                }
             });
         ');
     }

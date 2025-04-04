@@ -2,7 +2,7 @@
 
 Un plugin de WordPress avanzado para filtrar y bloquear el spam en formularios de Gravity Forms, con especial enfoque en bloquear spam conocido como el de "Eric Jones".
 
-![Versión](https://img.shields.io/badge/versión-1.0.0-blue)
+![Versión](https://img.shields.io/badge/versión-1.0.1-blue)
 ![WordPress](https://img.shields.io/badge/WordPress-5.0%2B-0073aa)
 ![PHP](https://img.shields.io/badge/PHP-7.0%2B-777bb3)
 ![License](https://img.shields.io/badge/licencia-GPL--2.0%2B-green)
@@ -12,7 +12,7 @@ Un plugin de WordPress avanzado para filtrar y bloquear el spam en formularios d
 
 ✅ **Filtrado inteligente**: Detecta y bloquea el spam basado en múltiples criterios configurables.
 
-✅ **Bloqueo por nombre**: Filtra automáticamente envíos de nombres específicos como "Eric Jones".
+✅ **Bloqueo por nombre**: Filtra automáticamente envíos de nombres específicos como "Eric Jones", utilizando múltiples estrategias de detección.
 
 ✅ **Bloqueo por email**: Permite bloquear correos electrónicos específicos o dominios completos.
 
@@ -20,9 +20,15 @@ Un plugin de WordPress avanzado para filtrar y bloquear el spam en formularios d
 
 ✅ **Detección de bots**: Identifica y bloquea envíos automatizados analizando el User Agent y la velocidad de envío.
 
+✅ **Sistema dual de tiempo**: Utiliza tanto cookies como campos ocultos para mayor compatibilidad entre navegadores.
+
+✅ **Compatible con cualquier WordPress**: Funciona en cualquier configuración de WordPress, independientemente del tema o plugins instalados.
+
 ✅ **Registro detallado**: Mantiene un historial completo de los intentos de spam bloqueados para análisis.
 
 ✅ **Panel de administración**: Interfaz intuitiva para gestionar todas las configuraciones anti-spam.
+
+✅ **Herramienta de depuración**: Diagnóstico avanzado para identificar y resolver problemas específicos.
 
 ## 📥 Instalación
 
@@ -59,7 +65,7 @@ Una vez activado el plugin, encontrarás un nuevo menú llamado "Anti-Spam GF" e
 1. En el campo "Nombres bloqueados", introduce los nombres que deseas bloquear separados por comas
 2. Por defecto, viene configurado con "Eric Jones"
 3. Puedes añadir cualquier otro nombre común en spam que estés recibiendo
-4. El sistema detectará coincidencias parciales (por ejemplo, "Eric Jones" también bloqueará "Eric A. Jones")
+4. El sistema detectará coincidencias parciales y utilizará múltiples estrategias para detectar nombres en diferentes tipos de campos
 
 ### Filtrado de correos electrónicos
 
@@ -92,6 +98,17 @@ Una vez activado el plugin, encontrarás un nuevo menú llamado "Anti-Spam GF" e
    - User Agent
    - Datos completos del formulario (expandibles)
 4. Puedes limpiar el registro con el botón "Limpiar registros"
+
+### Herramienta de depuración
+
+1. Accede a la pestaña "Depuración" en el menú Anti-Spam GF
+2. Aquí encontrarás información detallada sobre el último envío de formulario procesado
+3. Puedes ver:
+   - ID del formulario procesado
+   - Campos analizados y sus valores
+   - Si se encontraron coincidencias con nombres bloqueados
+   - Datos completos del envío
+4. Esta herramienta es útil para diagnosticar por qué ciertos envíos no se están bloqueando cuando deberían
 
 ## 📋 Ejemplos de uso
 
@@ -129,6 +146,7 @@ Este plugin es ideal para:
 ### El spam sigue pasando
 - Revisa la configuración y asegúrate de haber guardado los cambios
 - Examina los registros para identificar patrones que no estás filtrando
+- Utiliza la pestaña de depuración para ver por qué un envío específico no fue bloqueado
 - Añade más palabras clave o patrones específicos al spam que recibes
 - Considera aumentar el tiempo mínimo para completar el formulario
 
@@ -159,6 +177,14 @@ Este plugin es ideal para:
 Este plugin está licenciado bajo [GPL-2.0+](http://www.gnu.org/licenses/gpl-2.0.txt). Puedes usar, modificar y distribuir este software bajo los términos de esta licencia.
 
 ## 🔄 Registro de Cambios
+
+### 1.0.1 (04-04-2025)
+- Sistema dual de medición de tiempo (campo oculto + cookies) para mayor compatibilidad
+- Detección mejorada de nombres bloqueados con múltiples estrategias
+- Mejor compatibilidad con diferentes versiones de jQuery y JavaScript puro como fallback
+- Nueva herramienta de depuración para diagnosticar problemas
+- Validaciones adicionales para mayor robustez
+- Compatibilidad mejorada con cualquier instalación de WordPress
 
 ### 1.0.0 (03-04-2025)
 - Lanzamiento inicial del plugin
